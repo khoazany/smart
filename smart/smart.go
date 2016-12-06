@@ -19,14 +19,17 @@ package main
 import (
 	"errors"
 	"fmt"
-	// "strconv"
+	"strconv"
 	// "strings"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"encoding/json"
 	// "regexp"
+	"time"
 )
 
 var logger = shim.NewLogger("HDBChaincode")
+var activitiesStr = "_activities"
+var activityCountStr = "_activityCount"
 
 // ============================================================================================================================
 // ACTOR TYPE
@@ -34,12 +37,31 @@ var logger = shim.NewLogger("HDBChaincode")
 const ADMIN = "admin"
 const USER = "user"
 const VENDOR = "vendor"
+const BUSINESS = "business"
+
+// ============================================================================================================================
+// HANDLE TIME
+// ============================================================================================================================
+const (
+	millisPerSecond     = int64(time.Second / time.Millisecond)
+	nanosPerMillisecond = int64(time.Millisecond / time.Nanosecond)
+)
+
+func msToTime(ms string) (time.Time, error) {
+	msInt, err := strconv.ParseInt(ms, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	return time.Unix(msInt/millisPerSecond,
+		(msInt%millisPerSecond)*nanosPerMillisecond), nil
+}
 
 // ============================================================================================================================
 // ACTIVITY
 // ============================================================================================================================
 type Activity struct {
-	Token string `json:"token"`
+	ActivityId int `json:"activityId"`
 	Actor string `json:"actor"`
 	ActivityType string `json:"activityType"`
 	KioskId string `json:"kioskId"`
@@ -48,6 +70,11 @@ type Activity struct {
 	ResourceName string `json:"resourceName"`
 	Device Device `json:"device"`
 	Remark string `json:"remark"`
+	Timestamp int64 `json:"timestamp"`			//utc timestamp of creation
+}
+
+type AllActivities struct {
+	Activities []Activity `json:"activity"`
 }
 
 type Device struct {
@@ -59,15 +86,6 @@ type Device struct {
 }
 
 //==============================================================================================================================
-//	Token Holder - Defines the structure that holds all the tokens for activities that have been created.
-//				Used as an index when querying all tokens.
-//==============================================================================================================================
-
-type Tokens_Holder struct {
-	Tokens 	[]string `json:"tokens"`
-}
-
-//==============================================================================================================================
 //	Actor_and_eCert - Struct for storing the JSON of an actor and their ecert
 //==============================================================================================================================
 type Actor_and_eCert struct {
@@ -75,13 +93,16 @@ type Actor_and_eCert struct {
 	eCert string `json:"ecert"`
 }
 
-
 // SimpleChaincode example simple Chaincode implementation
 type SimpleChaincode struct {
 }
 
 // Init resets all the things
 func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
+	for i:=0; i < len(args); i=i+2 {
+		t.add_ecert(stub, args[i], args[i+1])
+	}
+
 	return nil, nil
 }
 
@@ -89,7 +110,11 @@ func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface, function string
 func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	caller, caller_affiliation, err := t.get_caller_data(stub)
 
-	if err != nil { return nil, errors.New("Error retrieving caller information")}
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Error retrieving caller information: %s", err); return nil, errors.New("Error retrieving caller information")}
+
+	logger.Debug("function: ", function)
+    logger.Debug("caller: ", caller)
+    logger.Debug("affiliation: ", caller_affiliation)
 
 	// Handle different functions	
 	if function == "create_activity" {													//initialize the chaincode state, used as reset
@@ -160,51 +185,72 @@ func (t *SimpleChaincode) read(stub shim.ChaincodeStubInterface, args []string) 
 //	 Create Vehicle - Creates the initial JSON for the vehcile and then saves it to the ledger.
 //=================================================================================================================================
 func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, caller string, caller_affiliation string, args []string) ([]byte, error) {
-	
-	if 	caller_affiliation != ADMIN && caller_affiliation != VENDOR {							// Only the admin can create a new v5c
-		return nil, errors.New("Permission Denied. create_activity")
+
+	if 	caller_affiliation != ADMIN {							// Only the admin can create new activity
+		fmt.Printf("CREATE_ACTIVITY: Permission Denied"); return nil, errors.New("Permission Denied")
 	}
 
-	var a Activity
+	activityCountAsBytes, err := stub.GetState(activityCountStr)
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Error when retrieving activity count: %s", err); return nil, errors.New("Error when retrieving activity count") }
 
-	token         := "\"Token\":\"" + args[0] + "\", "
-	actor         := "\"Actor\":\"" + args[1] + "\", "
-	activityType   := "\"ActivityType\":\"" + args[2] + "\", "
-	kioskId   := "\"KioskId\":\"" + args[3] + "\", "
-	resourceId   := "\"ResourceId\":\"" + args[4] + "\", "
-	resourceName   := "\"ResourceName\":\"" + args[5] + "\", "
-	resourceType   := "\"ResourceType\":\"" + args[6] + "\", "
-	deviceJson, err := t.device_to_json(args[7],args[8],args[9],args[10],args[11])
-																		if err != nil { return nil, errors.New("Error when reading device information") }
+	var activityCount int
+	json.Unmarshal(activityCountAsBytes, &activityCount)
 
-	device   := "\"Device\":" + deviceJson + ", "
-	remark   := "\"Remark\":\"" + args[12] + "\""
+	activityId := activityCount
+	actor         := args[1]
+	activityType   := args[2]
+	kioskId   := args[3]
+	resourceId   := args[4]
+	resourceName   := args[5]
+	resourceType   := args[6]
+	remark   := args[7]
+	timestamp   := makeTimestamp()	
+	device   := Device{DeviceType: args[8], Id1: args[9], Id2: args[10], Id3: args[11], Id4: args[12]}
 
-	activity_json := "{" + token + actor + activityType + kioskId + resourceId + resourceName + resourceType + device + remark + "}" 	// Concatenates the variables to create the total JSON object
+	// activity_json := "{" + token + actor + activityType + kioskId + resourceId + resourceName + resourceType + remark + "}" 	// Concatenates the variables to create the total JSON object
 
-	err = json.Unmarshal([]byte(activity_json), &a)							// Convert the JSON defined above into an activity object for go
+	// err = json.Unmarshal([]byte(activity_json), &a)							// Convert the JSON defined above into an activity object for go
 
-																		if err != nil { return nil, errors.New("Invalid JSON object") }
-	_, err  = t.save_changes(stub, a)
-																		if err != nil { fmt.Printf("CREATE_ACTIVITY: Error saving changes: %s", err); return nil, errors.New("Error saving changes") }
+	// 																	if err != nil { return nil, errors.New("Invalid JSON object") }
+	// _, err  = t.save_changes(stub, a)
 
-	bytes, err := stub.GetState("tokens")
+	var activity = Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, KioskId: kioskId, ResourceId: resourceId, ResourceName: resourceName, ResourceType: resourceType, Remark: remark, Timestamp: timestamp, Device: device}
+	// activityBytes, err := json.Marshal(&activity)
+	// if err != nil { fmt.Printf("CREATE_ACTIVITY: Error saving changes: %s", err); return nil, errors.New("Error saving changes") }
 
-																		if err != nil { return nil, errors.New("Unable to get tokens") }
+    // get the activity struct
+	activitiesAsBytes, err := stub.GetState(activitiesStr)
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Failed to retrieve activities: %s", err); return nil, errors.New("Failed to retrieve activities") }
+	var activities AllActivities
+	json.Unmarshal(activitiesAsBytes, &activities)
 
-	var tokens Tokens_Holder
+	activities.Activities = append(activities.Activities, activity)
+	fmt.Println("CREATE_ACTIVITY: Add new activity")
+	jsonAsBytes, err := json.Marshal(activities)
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Failed to update activities: %s", err); return nil, errors.New("Failed to update activities") }
+	
+	err = stub.PutState(activitiesStr, jsonAsBytes)								//rewrite open orders
+	if err != nil {
+		return nil, err
+	}
 
-	err = json.Unmarshal(bytes, &tokens)
-																		if err != nil {	return nil, errors.New("Corrupt Token_Holder record") }
+	fmt.Println("CREATE_ACTIVITY: End create activity process")																	
+	// bytes, err := stub.GetState("tokens")
+	// 																	if err != nil { return nil, errors.New("Unable to get tokens") }
 
-	tokens.Tokens = append(tokens.Tokens, token)
+	// var tokens Tokens_Holder
 
-	bytes, err = json.Marshal(tokens)
-															if err != nil { fmt.Print("Error creating Token_Holder record") }
+	// err = json.Unmarshal(bytes, &tokens)
+	// 																	if err != nil {	return nil, errors.New("Corrupt Token_Holder record") }
 
-	err = stub.PutState("tokens", bytes)
+	// tokens.Tokens = append(tokens.Tokens, token)
 
-															if err != nil { return nil, errors.New("Unable to put the state") }
+	// bytes, err = json.Marshal(tokens)
+	// 														if err != nil { fmt.Print("Error creating Token_Holder record") }
+
+	// err = stub.PutState("tokens", bytes)
+
+	// 														if err != nil { return nil, errors.New("Unable to put the state") }
 
 	return nil, nil
 }
@@ -246,8 +292,8 @@ func (t *SimpleChaincode) add_ecert(stub shim.ChaincodeStubInterface, name strin
 
 func (t *SimpleChaincode) get_username(stub shim.ChaincodeStubInterface) (string, error) {
 
-    username, err := stub.ReadCertAttribute("username");
-	if err != nil { return "", errors.New("Couldn't get attribute 'username'. Error: " + err.Error()) }
+    username, err := stub.ReadCertAttribute("account");
+	if err != nil { return "", errors.New("Couldn't get attribute 'account'. Error: " + err.Error()) }
 	return string(username), nil
 }
 
@@ -267,19 +313,12 @@ func (t *SimpleChaincode) check_affiliation(stub shim.ChaincodeStubInterface) (s
 //	 get_caller_data - Calls the get_ecert and check_role functions and returns the ecert and role for the
 //					 name passed.
 //==============================================================================================================================
-func (t * SimpleChaincode) device_to_json(deviceType string, id1 string, id2 string, id3 string, id4 string) (string, error) {
-	device := Device{DeviceType: deviceType, Id1: id1, Id2: id2, Id3: id3, Id4: id4}
-
-	bytes, err := json.Marshal(device)
-
-	if err != nil { fmt.Printf("SAVE_CHANGES: Error retrieving device json: %s", err); return "", errors.New("Error retrieving device json") }
-
-	return string(bytes), nil
-}
 
 func (t *SimpleChaincode) get_caller_data(stub shim.ChaincodeStubInterface) (string, string, error) {
 
 	user, err := t.get_username(stub)
+
+	logger.Debug("user: ", user)
 
 	affiliation, err := t.check_affiliation(stub);
 
@@ -288,21 +327,11 @@ func (t *SimpleChaincode) get_caller_data(stub shim.ChaincodeStubInterface) (str
 	return user, affiliation, nil
 }
 
-//==============================================================================================================================
-// save_changes - Writes to the ledger the Activity struct passed in a JSON format. Uses the shim file's
-//				  method 'PutState'.
-//==============================================================================================================================
-func (t *SimpleChaincode) save_changes(stub shim.ChaincodeStubInterface, a Activity) (bool, error) {
-
-	bytes, err := json.Marshal(a)
-
-	if err != nil { fmt.Printf("SAVE_CHANGES: Error converting activity record: %s", err); return false, errors.New("Error converting activity record") }
-
-	err = stub.PutState(a.Token, bytes)
-
-	if err != nil { fmt.Printf("SAVE_CHANGES: Error storing activity record: %s", err); return false, errors.New("Error storing activity record") }
-
-	return true, nil
+// ============================================================================================================================
+// Make Timestamp - create a timestamp in ms
+// ============================================================================================================================
+func makeTimestamp() int64 {
+    return time.Now().UnixNano() / (int64(time.Millisecond)/int64(time.Nanosecond))
 }
 
 // ============================================================================================================================
