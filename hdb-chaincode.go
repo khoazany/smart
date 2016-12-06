@@ -20,7 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	// "strings"
+	"strings"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"encoding/json"
 	// "regexp"
@@ -61,13 +61,11 @@ func msToTime(ms string) (time.Time, error) {
 // ACTIVITY
 // ============================================================================================================================
 type Activity struct {
-	ActivityId int `json:"activityId"`
-	Actor string `json:"actor"`
+	ActivityId int64 `json:"activityId"`
+	Actor Actor `json:"actor"`
 	ActivityType string `json:"activityType"`
-	KioskId string `json:"kioskId"`
-	ResourceType string `json:"resourceType"`
-	ResourceId string `json:"resourceId"`
-	ResourceName string `json:"resourceName"`
+	Kiosk Kiosk `json:"kiosk"`
+	Resources Resources `json:"resources"`
 	Device Device `json:"device"`
 	Remark string `json:"remark"`
 	Timestamp int64 `json:"timestamp"`			//utc timestamp of creation
@@ -83,6 +81,31 @@ type Device struct {
 	Id2 string `json:"id2"`
 	Id3 string `json:"id3"`
 	Id4 string `json:"id4"`
+}
+
+type Actor struct {
+	ActorType string `json:"actorType"`
+	Name string `json:"name"`
+	Telephone string `json:"telephone"`
+	Email string `json:"email"`
+}
+
+type Kiosk struct {
+	KioskId string `json:"kioskId"`
+	Latitude float64 `json:"float64"`
+	Longitude float64 `json:"float64"`
+	Details string `json:"details"`
+}
+
+type Resources struct {
+	Resources []Resource `json:"resources"`
+}
+
+type Resource struct {
+	ResourceOwner string `json:"resourceOwner"`
+	ResourceType string `json:"resourceType"`
+	ResourceId string `json:"resourceId"`
+	Details string `json:"details"`
 }
 
 //==============================================================================================================================
@@ -108,9 +131,10 @@ func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface, function string
 
 // Invoke is our entry point to invoke a chaincode function
 func (t *SimpleChaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
-	caller, caller_affiliation, err := t.get_caller_data(stub)
+	// caller, caller_affiliation, err := t.get_caller_data(stub)
 
-	if err != nil { fmt.Printf("CREATE_ACTIVITY: Error retrieving caller information: %s", err); return nil, errors.New("Error retrieving caller information")}
+	// if err != nil { fmt.Printf("CREATE_ACTIVITY: Error retrieving caller information: %s", err); return nil, errors.New("Error retrieving caller information")}
+	var caller, caller_affiliation string
 
 	logger.Debug("function: ", function)
     logger.Debug("caller: ", caller)
@@ -152,8 +176,8 @@ func (t *SimpleChaincode) Query(stub shim.ChaincodeStubInterface, function strin
 	fmt.Println("query is running " + function)
 
 	// Handle different functions
-	if function == "read" {											//read a variable
-		return t.read(stub, args)
+	if function == "view_activities" {											//read a variable
+		return t.view_activities(stub, args)
 	}
 	fmt.Println("query did not find func: " + function)						//error
 
@@ -179,6 +203,74 @@ func (t *SimpleChaincode) read(stub shim.ChaincodeStubInterface, args []string) 
 	return valAsbytes, nil
 }
 
+func (t *SimpleChaincode) view_activities(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+	// var key, jsonResp string
+	var err error
+
+	// if len(args) != 1 {
+	// 	return nil, errors.New("Incorrect number of arguments. Expecting 1")
+	// }
+
+	// get the activities struct
+	activitiesAsBytes, err := stub.GetState(activitiesStr)
+	if err != nil { fmt.Printf("VIEW_ACTIVITIES: Failed to retrieve activities: %s", err); return nil, errors.New("Failed to retrieve activities") }
+	
+	var activities AllActivities
+	json.Unmarshal(activitiesAsBytes, &activities)
+	var returnActivities []Activity
+
+	activityIds, err := sliceAtoi64(strings.Split(args[0], ","))
+	if err != nil { fmt.Printf("VIEW_ACTIVITIES: Failed to retrieve activityIds argument: %s", err); return nil, errors.New("Failed to retrieve activityIds argument") }
+
+	// actorTypes := args[1]
+	// names := args[2]
+	// telephones := args[3]
+	// emails := args[4]
+	// activityTypes := args[5]
+	// kioskIds := args[6]
+	// kioskDetails := args[7]
+	// resourceOwners := args[8]
+	// resourcesTypes := args[9]
+	// cabinets := args[10]
+
+	for i:= range activities.Activities {
+		var activity = activities.Activities[i]
+
+		if (len(activityIds) > 0 && !containsInt64(activityIds, activity.ActivityId)) {
+			continue
+		}
+
+		returnActivities = append(returnActivities, activity)
+	}
+
+	returnActivitiesBytes, err := json.Marshal(returnActivities)
+	if err != nil { fmt.Printf("VIEW_ACTIVITIES: Failed to convert activities: %s", err); return nil, errors.New("Failed to convert activities") }
+
+	return returnActivitiesBytes, nil
+}
+
+func sliceAtoi64(sa []string) ([]int64, error) {
+    si := make([]int64, 0, len(sa))
+    for _, a := range sa {
+        i, err := strconv.ParseInt(a,10,64)
+        if err != nil {
+            return si, err
+        }
+        si = append(si, i)
+    }
+    return si, nil
+}
+
+func containsInt64(slice []int64, item int64) bool {
+    set := make(map[int64]struct{}, len(slice))
+    for _, s := range slice {
+        set[s] = struct{}{}
+    }
+
+    _, ok := set[item] 
+    return ok
+}
+
 //=================================================================================================================================
 //	 Create Function
 //=================================================================================================================================
@@ -186,26 +278,34 @@ func (t *SimpleChaincode) read(stub shim.ChaincodeStubInterface, args []string) 
 //=================================================================================================================================
 func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, caller string, caller_affiliation string, args []string) ([]byte, error) {
 
-	if 	caller_affiliation != ADMIN {							// Only the admin can create new activity
-		fmt.Printf("CREATE_ACTIVITY: Permission Denied"); return nil, errors.New("Permission Denied")
-	}
+	// if 	caller_affiliation != ADMIN {							// Only the admin can create new activity
+	// 	fmt.Printf("CREATE_ACTIVITY: Permission Denied"); return nil, errors.New("Permission Denied")
+	// }
 
 	activityCountAsBytes, err := stub.GetState(activityCountStr)
 	if err != nil { fmt.Printf("CREATE_ACTIVITY: Error when retrieving activity count: %s", err); return nil, errors.New("Error when retrieving activity count") }
 
-	var activityCount int
-	json.Unmarshal(activityCountAsBytes, &activityCount)
+	var activityCount int64
+	activityCount = int64(binary.LittleEndian.Uint64(activityCountAsBytes))
 
-	activityId := activityCount
-	actor         := args[1]
-	activityType   := args[2]
-	kioskId   := args[3]
-	resourceId   := args[4]
-	resourceName   := args[5]
-	resourceType   := args[6]
-	remark   := args[7]
-	timestamp   := makeTimestamp()	
-	device   := Device{DeviceType: args[8], Id1: args[9], Id2: args[10], Id3: args[11], Id4: args[12]}
+	activityId       := activityCount
+	actor            := Actor{ActorType: args[0], Name: args[1], Telephone: args[2], Email: args[3]}
+	activityType     := args[4]
+	latitude, err := strconv.ParseFloat(args[6], 64)
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Invalid latitude format: %s", err); return nil, errors.New("Invalid latitude format") }	
+	longitude, err := strconv.ParseFloat(args[7], 64)
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Invalid longitude format: %s", err); return nil, errors.New("Invalid longitude format") }
+
+	kiosk            := Kiosk{KioskId: args[5], Latitude: latitude, Longitude: longitude, Details: args[8]}
+	remark           := args[9]
+	timestamp        := makeTimestamp()	
+	device           := Device{DeviceType: args[10], Id1: args[11], Id2: args[12], Id3: args[13], Id4: args[14]}
+
+	var resources Resources
+	for i:=15;i < len(args);i=i+4 {
+		resource := Resource{ResourceOwner: args[i], ResourceType: args[i+1], ResourceId: args[i+2], Details: args[i+3]}
+		resources.Resources = append(resources.Resources, resource)
+	}
 
 	// activity_json := "{" + token + actor + activityType + kioskId + resourceId + resourceName + resourceType + remark + "}" 	// Concatenates the variables to create the total JSON object
 
@@ -214,11 +314,11 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	// 																	if err != nil { return nil, errors.New("Invalid JSON object") }
 	// _, err  = t.save_changes(stub, a)
 
-	var activity = Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, KioskId: kioskId, ResourceId: resourceId, ResourceName: resourceName, ResourceType: resourceType, Remark: remark, Timestamp: timestamp, Device: device}
+	var activity = Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, Kiosk: kiosk, Resources: resources, Remark: remark, Timestamp: timestamp, Device: device}
 	// activityBytes, err := json.Marshal(&activity)
 	// if err != nil { fmt.Printf("CREATE_ACTIVITY: Error saving changes: %s", err); return nil, errors.New("Error saving changes") }
 
-    // get the activity struct
+    // get the activities struct
 	activitiesAsBytes, err := stub.GetState(activitiesStr)
 	if err != nil { fmt.Printf("CREATE_ACTIVITY: Failed to retrieve activities: %s", err); return nil, errors.New("Failed to retrieve activities") }
 	var activities AllActivities
@@ -229,7 +329,13 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	jsonAsBytes, err := json.Marshal(activities)
 	if err != nil { fmt.Printf("CREATE_ACTIVITY: Failed to update activities: %s", err); return nil, errors.New("Failed to update activities") }
 	
-	err = stub.PutState(activitiesStr, jsonAsBytes)								//rewrite open orders
+	err = stub.PutState(activitiesStr, jsonAsBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	activityCount = activityCount + 1
+	err = stub.PutState(activityCountStr, activityCount)
 	if err != nil {
 		return nil, err
 	}
