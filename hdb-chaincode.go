@@ -20,11 +20,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
+	// "strings"
 	"github.com/hyperledger/fabric/core/chaincode/shim"
 	"encoding/json"
 	// "regexp"
 	"time"
+	// "encoding/binary"
 )
 
 var logger = shim.NewLogger("HDBChaincode")
@@ -47,16 +48,6 @@ const (
 	nanosPerMillisecond = int64(time.Millisecond / time.Nanosecond)
 )
 
-func msToTime(ms string) (time.Time, error) {
-	msInt, err := strconv.ParseInt(ms, 10, 64)
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	return time.Unix(msInt/millisPerSecond,
-		(msInt%millisPerSecond)*nanosPerMillisecond), nil
-}
-
 // ============================================================================================================================
 // ACTIVITY
 // ============================================================================================================================
@@ -65,7 +56,7 @@ type Activity struct {
 	Actor Actor `json:"actor"`
 	ActivityType string `json:"activityType"`
 	Kiosk Kiosk `json:"kiosk"`
-	Resources Resources `json:"resources"`
+	Resources []Resource `json:"resources"`
 	Device Device `json:"device"`
 	Remark string `json:"remark"`
 	Timestamp int64 `json:"timestamp"`			//utc timestamp of creation
@@ -92,13 +83,9 @@ type Actor struct {
 
 type Kiosk struct {
 	KioskId string `json:"kioskId"`
-	Latitude float64 `json:"float64"`
-	Longitude float64 `json:"float64"`
+	Latitude float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
 	Details string `json:"details"`
-}
-
-type Resources struct {
-	Resources []Resource `json:"resources"`
 }
 
 type Resource struct {
@@ -124,6 +111,12 @@ type SimpleChaincode struct {
 func (t *SimpleChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	for i:=0; i < len(args); i=i+2 {
 		t.add_ecert(stub, args[i], args[i+1])
+	}
+
+	// Set initial activityCount = 0
+	err := stub.PutState(activityCountStr, []byte(strconv.FormatInt(0,10)))
+	if err != nil {
+		return nil, err
 	}
 
 	return nil, nil
@@ -219,24 +212,139 @@ func (t *SimpleChaincode) view_activities(stub shim.ChaincodeStubInterface, args
 	json.Unmarshal(activitiesAsBytes, &activities)
 	var returnActivities []Activity
 
-	activityIds, err := sliceAtoi64(strings.Split(args[0], ","))
+	var activityIds []int64
+	json.Unmarshal([]byte(args[0]), &activityIds)
 	if err != nil { fmt.Printf("VIEW_ACTIVITIES: Failed to retrieve activityIds argument: %s", err); return nil, errors.New("Failed to retrieve activityIds argument") }
 
-	// actorTypes := args[1]
-	// names := args[2]
-	// telephones := args[3]
-	// emails := args[4]
-	// activityTypes := args[5]
-	// kioskIds := args[6]
-	// kioskDetails := args[7]
-	// resourceOwners := args[8]
-	// resourcesTypes := args[9]
-	// cabinets := args[10]
+	var actorTypes []string
+	json.Unmarshal([]byte(args[1]), &actorTypes)
+	
+	var names []string
+	json.Unmarshal([]byte(args[2]), &names)
 
-	for i:= range activities.Activities {
+	var telephones []string
+	json.Unmarshal([]byte(args[3]), &telephones)
+
+	var emails []string
+	json.Unmarshal([]byte(args[4]), &emails)
+
+	var activityTypes []string
+	json.Unmarshal([]byte(args[5]), &activityTypes)
+
+	var kioskIds []string
+	json.Unmarshal([]byte(args[6]), &kioskIds)
+
+	var deviceTypes []string
+	json.Unmarshal([]byte(args[7]), &deviceTypes)
+
+	var id1s []string
+	json.Unmarshal([]byte(args[8]), &id1s)
+
+	var id2s []string
+	json.Unmarshal([]byte(args[9]), &id2s)
+
+	var id3s []string
+	json.Unmarshal([]byte(args[10]), &id3s)
+
+	var id4s []string
+	json.Unmarshal([]byte(args[11]), &id4s)
+
+	var resourceOwners []string
+	json.Unmarshal([]byte(args[12]), &resourceOwners)
+
+	var resourceTypes []string
+	json.Unmarshal([]byte(args[13]), &resourceTypes)
+
+	var resourceIds []string
+	json.Unmarshal([]byte(args[14]), &resourceIds)
+
+ 	start := time.Time{}
+	if (args[15] != "") {
+		start, err = time.Parse("2006-01-02T15:04:05-0700", args[15])
+		if err != nil { fmt.Printf("VIEW_ACTIVITIES: Invalid start time format: %s", err); return nil, errors.New("Invalid start time format") }
+	}
+
+	end := time.Time{}
+	if (args[16] != "") {
+	    end, err = time.Parse("2006-01-02T15:04:05-0700", args[16])
+	    if err != nil { fmt.Printf("VIEW_ACTIVITIES: Invalid end time format: %s", err); return nil, errors.New("Invalid end time format") }
+	}
+
+	for i := range activities.Activities {
 		var activity = activities.Activities[i]
 
 		if (len(activityIds) > 0 && !containsInt64(activityIds, activity.ActivityId)) {
+			continue
+		}
+
+		if (len(actorTypes) > 0 && !containsString(actorTypes, activity.Actor.ActorType)) {
+			continue
+		}
+
+		if (len(names) > 0 && !containsString(names, activity.Actor.Name)) {
+			continue
+		}
+
+		if (len(telephones) > 0 && !containsString(telephones, activity.Actor.Telephone)) {
+			continue
+		}
+
+		if (len(emails) > 0 && !containsString(emails, activity.Actor.Email)) {
+			continue
+		}
+
+		if (len(activityTypes) > 0 && !containsString(activityTypes, activity.ActivityType)) {
+			continue
+		}
+
+		if (len(kioskIds) > 0 && !containsString(kioskIds, activity.Kiosk.KioskId)) {
+			continue
+		}
+
+		if (len(resourceOwners) > 0 || len(resourceTypes) > 0 || len(resourceIds) > 0) {
+			var existed = false
+			for j := range activity.Resources {
+				if (len(resourceOwners) > 0 && !containsString(resourceOwners, activity.Resources[j].ResourceOwner)) {
+					continue
+				}
+
+				if (len(resourceTypes) > 0 && !containsString(resourceTypes, activity.Resources[j].ResourceType)) {
+					continue
+				}
+
+				if (len(resourceIds) > 0 && !containsString(resourceIds, activity.Resources[j].ResourceId)) {
+					continue
+				}
+
+				existed = true
+			}
+
+			if (!existed) {
+				continue
+			}
+		}
+
+		if (len(deviceTypes) > 0 && !containsString(deviceTypes, activity.Device.DeviceType)) {
+			continue
+		}
+
+		if (len(id1s) > 0 && !containsString(id1s, activity.Device.Id1)) {
+			continue
+		}
+
+		if (len(id2s) > 0 && !containsString(id2s, activity.Device.Id2)) {
+			continue
+		}
+
+		if (len(id3s) > 0 && !containsString(id3s, activity.Device.Id3)) {
+			continue
+		}
+
+		if (len(id4s) > 0 && !containsString(id4s, activity.Device.Id4)) {
+			continue
+		}
+
+		if ((!start.IsZero() || !end.IsZero()) && !inTimeSpan(start,end,int64ToTime(activity.Timestamp))) {
 			continue
 		}
 
@@ -271,6 +379,30 @@ func containsInt64(slice []int64, item int64) bool {
     return ok
 }
 
+func containsString(slice []string, item string) bool {
+    set := make(map[string]struct{}, len(slice))
+    for _, s := range slice {
+        set[s] = struct{}{}
+    }
+
+    _, ok := set[item] 
+    return ok
+}
+
+func inTimeSpan(start, end, check time.Time) bool {
+	logger.Debug("start: ", start)
+	logger.Debug("end: ", end)
+	logger.Debug("check: ", check)
+
+    return (start.IsZero() || check.After(start)) && (end.IsZero() || check.Before(end))
+}
+
+func int64ToTime(msInt int64) (time.Time) {
+
+	return time.Unix(msInt/millisPerSecond,
+		(msInt%millisPerSecond)*nanosPerMillisecond)
+}
+
 //=================================================================================================================================
 //	 Create Function
 //=================================================================================================================================
@@ -285,8 +417,10 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	activityCountAsBytes, err := stub.GetState(activityCountStr)
 	if err != nil { fmt.Printf("CREATE_ACTIVITY: Error when retrieving activity count: %s", err); return nil, errors.New("Error when retrieving activity count") }
 
-	var activityCount int64
-	activityCount = int64(binary.LittleEndian.Uint64(activityCountAsBytes))
+	activityCount, err := strconv.ParseInt(string(activityCountAsBytes), 10, 64)
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Error when converting activity count: %s", err); return nil, errors.New("Error when converting activity count") }
+
+	logger.Debug("activityCount: ", activityCount)
 
 	activityId       := activityCount
 	actor            := Actor{ActorType: args[0], Name: args[1], Telephone: args[2], Email: args[3]}
@@ -301,10 +435,13 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	timestamp        := makeTimestamp()	
 	device           := Device{DeviceType: args[10], Id1: args[11], Id2: args[12], Id3: args[13], Id4: args[14]}
 
-	var resources Resources
+	logger.Debug("args: ", 14)
+
+	var resources []Resource
 	for i:=15;i < len(args);i=i+4 {
 		resource := Resource{ResourceOwner: args[i], ResourceType: args[i+1], ResourceId: args[i+2], Details: args[i+3]}
-		resources.Resources = append(resources.Resources, resource)
+		resources = append(resources, resource)
+		logger.Debug("args: ", i+3)
 	}
 
 	// activity_json := "{" + token + actor + activityType + kioskId + resourceId + resourceName + resourceType + remark + "}" 	// Concatenates the variables to create the total JSON object
@@ -314,7 +451,7 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	// 																	if err != nil { return nil, errors.New("Invalid JSON object") }
 	// _, err  = t.save_changes(stub, a)
 
-	var activity = Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, Kiosk: kiosk, Resources: resources, Remark: remark, Timestamp: timestamp, Device: device}
+	activity := Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, Kiosk: kiosk, Resources: resources, Remark: remark, Timestamp: timestamp, Device: device}
 	// activityBytes, err := json.Marshal(&activity)
 	// if err != nil { fmt.Printf("CREATE_ACTIVITY: Error saving changes: %s", err); return nil, errors.New("Error saving changes") }
 
@@ -335,10 +472,13 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	}
 
 	activityCount = activityCount + 1
-	err = stub.PutState(activityCountStr, activityCount)
+	err = stub.PutState(activityCountStr, []byte(strconv.FormatInt(activityCount,10)))
 	if err != nil {
 		return nil, err
 	}
+
+	jsonAsBytes, err = json.Marshal(activity)
+	if err != nil { fmt.Printf("CREATE_ACTIVITY: Failed to return the new activity: %s", err); return nil, errors.New("Failed to return the new activity") }
 
 	fmt.Println("CREATE_ACTIVITY: End create activity process")																	
 	// bytes, err := stub.GetState("tokens")
@@ -358,7 +498,8 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 
 	// 														if err != nil { return nil, errors.New("Unable to put the state") }
 
-	return nil, nil
+
+	return jsonAsBytes, nil
 }
 
 //==============================================================================================================================
