@@ -55,6 +55,7 @@ type Activity struct {
 	ActivityId int64 `json:"activityId"`
 	Actor Actor `json:"actor"`
 	ActivityType string `json:"activityType"`
+	ActivityStage string `json:"activityStage"`
 	Kiosk Kiosk `json:"kiosk"`
 	Resources []Resource `json:"resources"`
 	Device Device `json:"device"`
@@ -231,42 +232,45 @@ func (t *SimpleChaincode) view_activities(stub shim.ChaincodeStubInterface, args
 	var activityTypes []string
 	json.Unmarshal([]byte(args[5]), &activityTypes)
 
+	var activityStages []string
+	json.Unmarshal([]byte(args[6]), &activityStages)
+
 	var kioskIds []string
-	json.Unmarshal([]byte(args[6]), &kioskIds)
+	json.Unmarshal([]byte(args[7]), &kioskIds)
 
 	var deviceTypes []string
-	json.Unmarshal([]byte(args[7]), &deviceTypes)
+	json.Unmarshal([]byte(args[8]), &deviceTypes)
 
 	var id1s []string
-	json.Unmarshal([]byte(args[8]), &id1s)
+	json.Unmarshal([]byte(args[9]), &id1s)
 
 	var id2s []string
-	json.Unmarshal([]byte(args[9]), &id2s)
+	json.Unmarshal([]byte(args[10]), &id2s)
 
 	var id3s []string
-	json.Unmarshal([]byte(args[10]), &id3s)
+	json.Unmarshal([]byte(args[11]), &id3s)
 
 	var id4s []string
-	json.Unmarshal([]byte(args[11]), &id4s)
+	json.Unmarshal([]byte(args[12]), &id4s)
 
 	var resourceOwners []string
-	json.Unmarshal([]byte(args[12]), &resourceOwners)
+	json.Unmarshal([]byte(args[13]), &resourceOwners)
 
 	var resourceTypes []string
-	json.Unmarshal([]byte(args[13]), &resourceTypes)
+	json.Unmarshal([]byte(args[14]), &resourceTypes)
 
 	var resourceIds []string
-	json.Unmarshal([]byte(args[14]), &resourceIds)
+	json.Unmarshal([]byte(args[15]), &resourceIds)
 
  	start := time.Time{}
 	if (args[15] != "") {
-		start, err = time.Parse("2006-01-02T15:04:05-0700", args[15])
+		start, err = time.Parse("2006-01-02T15:04:05-0700", args[16])
 		if err != nil { fmt.Printf("VIEW_ACTIVITIES: Invalid start time format: %s", err); return nil, errors.New("Invalid start time format") }
 	}
 
 	end := time.Time{}
 	if (args[16] != "") {
-	    end, err = time.Parse("2006-01-02T15:04:05-0700", args[16])
+	    end, err = time.Parse("2006-01-02T15:04:05-0700", args[17])
 	    if err != nil { fmt.Printf("VIEW_ACTIVITIES: Invalid end time format: %s", err); return nil, errors.New("Invalid end time format") }
 	}
 
@@ -294,6 +298,10 @@ func (t *SimpleChaincode) view_activities(stub shim.ChaincodeStubInterface, args
 		}
 
 		if (len(activityTypes) > 0 && !containsString(activityTypes, activity.ActivityType)) {
+			continue
+		}
+
+		if (len(activityStages) > 0 && !containsString(activityStages, activity.ActivityStage)) {
 			continue
 		}
 
@@ -425,20 +433,21 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	activityId       := activityCount
 	actor            := Actor{ActorType: args[0], Name: args[1], Telephone: args[2], Email: args[3]}
 	activityType     := args[4]
-	latitude, err := strconv.ParseFloat(args[6], 64)
+	activityStage     := args[5]
+	latitude, err := strconv.ParseFloat(args[7], 64)
 	if err != nil { fmt.Printf("CREATE_ACTIVITY: Invalid latitude format: %s", err); return nil, errors.New("Invalid latitude format") }	
-	longitude, err := strconv.ParseFloat(args[7], 64)
+	longitude, err := strconv.ParseFloat(args[8], 64)
 	if err != nil { fmt.Printf("CREATE_ACTIVITY: Invalid longitude format: %s", err); return nil, errors.New("Invalid longitude format") }
 
-	kiosk            := Kiosk{KioskId: args[5], Latitude: latitude, Longitude: longitude, Details: args[8]}
-	remark           := args[9]
+	kiosk            := Kiosk{KioskId: args[6], Latitude: latitude, Longitude: longitude, Details: args[9]}
+	remark           := args[10]
 	timestamp        := makeTimestamp()	
-	device           := Device{DeviceType: args[10], Id1: args[11], Id2: args[12], Id3: args[13], Id4: args[14]}
+	device           := Device{DeviceType: args[11], Id1: args[12], Id2: args[13], Id3: args[14], Id4: args[15]}
 
-	logger.Debug("args: ", 14)
+	logger.Debug("args: ", 15)
 
 	var resources []Resource
-	for i:=15;i < len(args);i=i+4 {
+	for i:=16;i < len(args);i=i+4 {
 		resource := Resource{ResourceOwner: args[i], ResourceType: args[i+1], ResourceId: args[i+2], Details: args[i+3]}
 		resources = append(resources, resource)
 		logger.Debug("args: ", i+3)
@@ -451,7 +460,7 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	// 																	if err != nil { return nil, errors.New("Invalid JSON object") }
 	// _, err  = t.save_changes(stub, a)
 
-	activity := Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, Kiosk: kiosk, Resources: resources, Remark: remark, Timestamp: timestamp, Device: device}
+	activity := Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, ActivityStage: activityStage, Kiosk: kiosk, Resources: resources, Remark: remark, Timestamp: timestamp, Device: device}
 	// activityBytes, err := json.Marshal(&activity)
 	// if err != nil { fmt.Printf("CREATE_ACTIVITY: Error saving changes: %s", err); return nil, errors.New("Error saving changes") }
 

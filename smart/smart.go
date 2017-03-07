@@ -214,8 +214,7 @@ func (t *SimpleChaincode) create_activity(stub shim.ChaincodeStubInterface, call
 	// 																	if err != nil { return nil, errors.New("Invalid JSON object") }
 	// _, err  = t.save_changes(stub, a)
 
-	var activity,err := Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, KioskId: kioskId, ResourceId: resourceId, ResourceName: resourceName, ResourceType: resourceType, Remark: remark, Timestamp: timestamp, Device: device}
-	if err != nil { fmt.Printf("CREATE_ACTIVITY: Failed to construct new activity: %s", err); return nil, errors.New("Failed to construct new activity") }
+	var activity := Activity{ActivityId: activityId, Actor: actor, ActivityType: activityType, KioskId: kioskId, ResourceId: resourceId, ResourceName: resourceName, ResourceType: resourceType, Remark: remark, Timestamp: timestamp, Device: device}
 	// activityBytes, err := json.Marshal(&activity)
 	// if err != nil { fmt.Printf("CREATE_ACTIVITY: Error saving changes: %s", err); return nil, errors.New("Error saving changes") }
 
