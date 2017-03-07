@@ -263,13 +263,13 @@ func (t *SimpleChaincode) view_activities(stub shim.ChaincodeStubInterface, args
 	json.Unmarshal([]byte(args[15]), &resourceIds)
 
  	start := time.Time{}
-	if (args[15] != "") {
+	if (args[16] != "") {
 		start, err = time.Parse("2006-01-02T15:04:05-0700", args[16])
 		if err != nil { fmt.Printf("VIEW_ACTIVITIES: Invalid start time format: %s", err); return nil, errors.New("Invalid start time format") }
 	}
 
 	end := time.Time{}
-	if (args[16] != "") {
+	if (args[17] != "") {
 	    end, err = time.Parse("2006-01-02T15:04:05-0700", args[17])
 	    if err != nil { fmt.Printf("VIEW_ACTIVITIES: Invalid end time format: %s", err); return nil, errors.New("Invalid end time format") }
 	}
